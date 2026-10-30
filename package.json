@@ -23,13 +23,17 @@
     "test:smoke": "vitest --run test/smoke.pi.test.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.4.0",
     "fetch-socks": "1.3.3",
-    "typebox": "1.3.27",
     "undici": "8.12.3"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "@types/node": "^24.0.0",
+    "typebox": "1.3.27",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"
   }
