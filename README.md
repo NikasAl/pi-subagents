@@ -86,7 +86,7 @@ One file: `~/.pi/agent/pi-subagents.json` (override the location with the `PI_SU
 ### Roles
 
 - **Agent files** (recommended): `~/.pi/agent/agents/<role>.md` with frontmatter `name`, `description`, optional `tools` (comma-separated whitelist passed as `--tools` to the child), optional `model` (default single model). The file body is the role's **entire system prompt** (it replaces pi's default in the child — see [Transparency](#transparency)). See [`agents/`](agents/) for ready examples (`scout`, `planner`, `worker`, `reviewer`).
-- **Fallback lists**: `roles.<name>.models` in the config — priority-ordered `provider/id` refs. Index 0 is primary. If a role has a config list, it overrides the agent file's single `model`. A role exists when it has an agent file **and/or** a config entry with models.
+- **Fallback lists**: `roles.<name>.models` in the config — priority-ordered `provider/id` refs. Index 0 is primary. Model ids may themselves contain slashes (gateway-style ids, split on the first slash only, e.g. `xkiro/qwen/qwen3.7-max:free`). If a role has a config list, it overrides the agent file's single `model`. A role exists when it has an agent file **and/or** a config entry with models.
 - **Knobs**: `sticky` (`"turn"` — return to the primary model on each new user turn; `"session"` — stay on the model that answered last), `maxAttempts` (level-1 respawns, default 2), `timeoutMs` (per spawn, default 600000), `cwd`, `thinking`.
 
 ### Model fallback: how it works

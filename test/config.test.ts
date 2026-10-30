@@ -38,8 +38,13 @@ describe("parseConfig", () => {
 
         it("rejects malformed model refs", () => {
                 expect(() => parseConfig({ roles: { r: { models: ["no-slash"] } } })).toThrow(ConfigError);
-                expect(() => parseConfig({ roles: { r: { models: ["a/b/c"] } } })).toThrow(ConfigError);
+                expect(() => parseConfig({ roles: { r: { models: ["prov/"] } } })).toThrow(ConfigError);
+                expect(() => parseConfig({ roles: { r: { models: ["/id"] } } })).toThrow(ConfigError);
                 expect(() => parseConfig({ roles: { r: { models: [] } } })).toThrow(ConfigError);
+        });
+
+        it("accepts gateway-style model ids containing slashes", () => {
+                expect(() => parseConfig({ roles: { r: { models: ["xkiro/qwen/qwen3.7-max:free"] } } })).not.toThrow();
         });
 
         it("rejects unknown provider api", () => {

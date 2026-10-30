@@ -2,7 +2,24 @@ import { describe, expect, it } from "vitest";
 import { classifyFailure } from "../src/router/errors.ts";
 import { HealthTracker } from "../src/router/health.ts";
 import { FallbackRouter, parseExcludeList } from "../src/router/router.ts";
-import type { ModelRef } from "../src/router/types.ts";
+import { parseModelRef, type ModelRef } from "../src/router/types.ts";
+
+describe("parseModelRef", () => {
+        it("splits on the first slash", () => {
+                expect(parseModelRef("anthropic/claude-haiku-4-5")).toEqual({ provider: "anthropic", id: "claude-haiku-4-5" });
+        });
+
+        it("allows gateway-style model ids containing slashes (xkiro etc.)", () => {
+                expect(parseModelRef("xkiro/qwen/qwen3.7-max:free")).toEqual({ provider: "xkiro", id: "qwen/qwen3.7-max:free" });
+        });
+
+        it("rejects refs without a slash or with empty parts", () => {
+                expect(parseModelRef("noslash")).toBeNull();
+                expect(parseModelRef("/id")).toBeNull();
+                expect(parseModelRef("prov/")).toBeNull();
+                expect(parseModelRef("")).toBeNull();
+        });
+});
 
 describe("FallbackRouter", () => {
         const models: ModelRef[] = ["a/m1", "b/m2", "c/m3"];

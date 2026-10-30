@@ -13,7 +13,9 @@ export function parseModelRef(ref: string): { provider: string; id: string } | n
         if (slash <= 0 || slash === ref.length - 1) return null;
         const provider = ref.slice(0, slash);
         const id = ref.slice(slash + 1);
-        if (provider.includes("/") || id.includes("/")) return null;
+        // Provider names cannot contain a slash; model ids MAY (e.g. xkiro-style
+        // gateway ids like "qwen/qwen3.7-max:free").
+        if (provider.includes("/")) return null;
         return { provider, id };
 }
 
