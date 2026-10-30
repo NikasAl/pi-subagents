@@ -1,0 +1,36 @@
+{
+  "name": "pi-subagents",
+  "version": "0.1.0",
+  "description": "Role-based subagents for pi with per-role model fallback routing and per-provider SOCKS5 proxies",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NikasAl/pi-subagents.git"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest --run",
+    "test:unit": "vitest --run --exclude 'test/smoke.pi.test.ts'",
+    "test:smoke": "vitest --run test/smoke.pi.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "fetch-socks": "1.3.3",
+    "typebox": "1.3.27",
+    "undici": "8.12.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}

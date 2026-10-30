@@ -1,0 +1,88 @@
+{
+  "$comment": "Example pi-subagents config. Copy to ~/.pi/agent/pi-subagents.json and edit. Priority = array order: index 0 is primary, the rest are fallbacks.",
+
+  "defaults": {
+    "parallel": 4,
+    "recoverySuccesses": 2,
+    "cooldowns": {
+      "rate_limit": 60000,
+      "quota": 900000,
+      "overloaded": 20000,
+      "network": 30000,
+      "auth": 600000,
+      "unknown": 30000
+    }
+  },
+
+  "roles": {
+    "scout": {
+      "models": [
+        "anthropic/claude-haiku-4-5",
+        "my-openai-via-socks/gpt-5-mini",
+        "google/gemini-2.5-flash"
+      ],
+      "sticky": "turn",
+      "maxAttempts": 2
+    },
+    "planner": {
+      "models": [
+        "anthropic/claude-sonnet-4-5",
+        "my-openai-via-socks/gpt-5"
+      ],
+      "thinking": "medium"
+    },
+    "worker": {
+      "models": [
+        "anthropic/claude-sonnet-4-5",
+        "my-openai-via-socks/gpt-5"
+      ],
+      "sticky": "session",
+      "timeoutMs": 900000
+    },
+    "reviewer": {
+      "models": [
+        "anthropic/claude-sonnet-4-5",
+        "my-openai-via-socks/gpt-5-mini"
+      ]
+    }
+  },
+
+  "proxies": {
+    "main": {
+      "host": "127.0.0.1",
+      "port": 1080,
+      "type": 5,
+      "username": "$SOCKS_USER",
+      "password": "$SOCKS_PASSWORD"
+    }
+  },
+
+  "providers": {
+    "my-openai-via-socks": {
+      "proxy": "main",
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "$OPENAI_API_KEY",
+      "models": [
+        {
+          "id": "gpt-5-mini",
+          "name": "GPT-5 Mini (via SOCKS5)",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 400000,
+          "maxTokens": 16384,
+          "cost": { "input": 0.1, "output": 0.4, "cacheRead": 0.02, "cacheWrite": 0.1 }
+        },
+        {
+          "id": "gpt-5",
+          "name": "GPT-5 (via SOCKS5)",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 400000,
+          "maxTokens": 128000,
+          "cost": { "input": 1.25, "output": 10, "cacheRead": 0.12, "cacheWrite": 1.25 }
+        }
+      ]
+    }
+  }
+}
