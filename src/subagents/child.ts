@@ -74,10 +74,41 @@ export function resolvePiCli(): { command: string; baseArgs: string[] } | null {
         } catch {
                 /* fall through */
         }
-        // Fallback: the running pi script itself (process.argv[1] when inside pi).
+        // Fallback 1: the running pi CLI itself (process.argv[1]). Follow symlinks:
+        // managed installs exec the npm shim `node_modules/.bin/pi`, which resolves to
+        // `dist/bundle/cli.js` — the shim path itself does not end in cli.js.
         const running = process.argv[1];
-        if (running && fs.existsSync(running) && /cli\.js$|rpc-entry\.js$/.test(running)) {
-                return { command: process.execPath, baseArgs: [running] };
+        if (running && fs.existsSync(running)) {
+                let real = running;
+                try {
+                        real = fs.realpathSync(running);
+                } catch {
+                        /* keep raw path */
+                }
+                if (/cli\.js$|rpc-entry\.js$/.test(real) || /cli\.js$|rpc-entry\.js$/.test(running)) {
+                        return { command: process.execPath, baseArgs: [real] };
+                }
+        }
+        // Fallback 2: managed pi install root (PI_MANAGED_INSTALL_ROOT is set by the pi launcher).
+        const managedRoot = process.env["PI_MANAGED_INSTALL_ROOT"];
+        if (managedRoot) {
+                try {
+                        const version = fs.readFileSync(path.join(managedRoot, "current-version"), "utf-8").trim();
+                        const cliPath = path.join(
+                                managedRoot,
+                                "releases",
+                                version,
+                                "node_modules",
+                                "@earendil-works",
+                                "pi-coding-agent",
+                                "dist",
+                                "bundle",
+                                "cli.js",
+                        );
+                        if (fs.existsSync(cliPath)) return { command: process.execPath, baseArgs: [cliPath] };
+                } catch {
+                        /* fall through */
+                }
         }
         return null;
 }
