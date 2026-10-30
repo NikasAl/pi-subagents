@@ -52,6 +52,8 @@ ln -s "$(pwd)"/agents/*.md ~/.pi/agent/agents/
 
 Verify: start `pi` interactively and run `/roles` (it prints roles, fallback lists and provider health).
 
+Note: when running a session *on* a role (`pi --model roles/<name>`), use TUI mode or `--mode json` print mode. Plain `pi -p` resolves `--model` against the catalogue before extensions load, so virtual `roles/*` models are not visible there.
+
 ## Configuration
 
 One file: `~/.pi/agent/pi-subagents.json` (override the location with the `PI_SUBAGENTS_CONFIG` env var). See [`examples/pi-subagents.json`](examples/pi-subagents.json) for a full annotated example.
