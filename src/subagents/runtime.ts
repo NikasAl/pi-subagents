@@ -102,6 +102,8 @@ export class Runtime {
         readonly envExcluded: Set<ModelRef>;
         /** Max parallel children (tool parallel mode). */
         readonly parallelLimit: number;
+        /** Default directory for verbose tool-call logs. */
+        readonly toolLogDir: string;
         modelRegistry: ModelRegistry | null = null;
 
         private readonly rolesByName = new Map<string, EffectiveRole>();
@@ -130,6 +132,7 @@ export class Runtime {
                 this.configMissing = configMissing;
                 this.configError = configError;
                 this.parallelLimit = config.defaults?.parallel ?? 4;
+                this.toolLogDir = path.join(this.agentDir, "pi-subagents", "toollogs");
 
                 this.health = new HealthTracker(undefined, {
                         cooldowns: config.defaults?.cooldowns ?? {},

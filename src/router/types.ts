@@ -143,6 +143,13 @@ export interface SubagentsConfig {
                 cooldowns?: Partial<Record<FailureClass, number>>;
                 /** Consecutive successes required to clear a model's failure state. */
                 recoverySuccesses?: number;
+                /**
+                 * Verbose tool-call logging for debugging. Default off.
+                 * true = default dir (<agentDir>/pi-subagents/toollogs), false = off,
+                 * "on"/"off", or a path (dir; *.jsonl/*.log = exact file runs append to).
+                 * Overridden by PI_SUBAGENTS_TOOLLOG and the tool's verboseLog parameter.
+                 */
+                toolLog?: boolean | string;
         };
 }
 

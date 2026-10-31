@@ -4,6 +4,10 @@
   "defaults": {
     "parallel": 4,
     "recoverySuccesses": 2,
+
+    "$comment_toolLog": "Verbose tool-call logging for debugging, off by default. true = <agentDir>/pi-subagents/toollogs/, or a directory / *.jsonl file path. Per-call override: {role, task, verboseLog: true}; session override: PI_SUBAGENTS_TOOLLOG=on|off|path.",
+    "toolLog": false,
+
     "cooldowns": {
       "rate_limit": 60000,
       "quota": 900000,

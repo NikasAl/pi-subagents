@@ -146,10 +146,40 @@ attempt 1: dead-socks/test-model → failed[network]: connect ECONNREFUSED 127.0
 attempt 2: mock-via-socks/test-model → failed[rate_limit]: 429 too many requests (exit 1, stop=error)
 ```
 
+### Verbose tool-call logging (debugging)
+
+When a subagent "thinks forever" or seems stuck, enable verbose logging to see exactly what it is doing — every child tool call (name, arguments, full result or error) — written incrementally to a JSONL file you can `tail -f` while the child runs. **Off by default**; enabling does not change any other behavior.
+
+Three switches (first match wins):
+
+1. **Tool parameter** — the model can pass `verboseLog: true` for one call:
+   `{ "role": "scout", "task": "...", "verboseLog": true }`
+2. **Env var** — `PI_SUBAGENTS_TOOLLOG=on` (or `off`, or a path) for a whole pi session.
+3. **Config** — `"defaults": { "toolLog": true }` in `pi-subagents.json` (or `"on"`/`"off"`, or a path).
+
+The value is a boolean, `on`/`off`, or a path. A path ending in `.jsonl`/`.log` is used as the exact output file (runs append); any other path is a directory holding one file per attempt. Default directory: `~/.pi/agent/pi-subagents/toollogs/`, file name `<timestamp>-<role>-attempt<N>.jsonl`.
+
+The log never enters the parent's model context: the tool result only gets one short pointer line (`tool log: <path>`), and the `pi-subagents.trace` session entry stores the paths too — `pi.appendEntry()` entries are documented by pi as *durable data excluded from model context*. Files are created with `0600` permissions and may contain tool output/secrets — don't commit them.
+
+Example file (one JSON object per line):
+
+```jsonl
+{"type":"run_start","ts":"...","role":"tester","attempt":1,"model":"dead-socks/test-model","task":"...","cwd":"...","pid":123}
+{"type":"assistant","ts":"...","provider":"dead-socks","stopReason":"error","errorMessage":"Connection error.","toolCalls":[],"textLength":0}
+{"type":"assistant","ts":"...","provider":"mock-via-socks","stopReason":"toolUse","toolCalls":[{"id":"call_1","name":"bash","arguments":{"command":"echo hi"}}],"textLength":0}
+{"type":"tool_call_start","ts":"...","toolCallId":"call_1","toolName":"bash","args":{"command":"echo hi"}}
+{"type":"tool_update","ts":"...","toolCallId":"call_1","toolName":"bash","partialTextLength":17}
+{"type":"tool_result_end","ts":"...","toolCallId":"call_1","toolName":"bash","isError":false,"durationMs":6,"result":{"content":[{"type":"text","text":"hi\n"}]}}
+{"type":"assistant","ts":"...","provider":"mock-via-socks","stopReason":"stop","textLength":10}
+{"type":"run_end","ts":"...","exitCode":0,"timedOut":false,"aborted":false,"durationMs":900,"toolCallCount":1}
+```
+
+`run_start` records the planned model of the attempt; the `assistant` lines show the physical provider/model that actually answered — so level-2 fallback inside the child is visible in one file. Long-running tools emit slim `tool_update` markers (text length only) so a hanging child is distinguishable from a busy one.
+
 ## Transparency (no black boxes)
 
 - **What the child sees**: exactly the role system prompt (`--system-prompt` replaces pi's default), the task as the user message, the whitelisted tools. The child is spawned with `-ne -e <this extension> -nc --no-skills` — no discovered extensions, no AGENTS.md/CLAUDE.md, no skills; config files (`models.json`, `auth.json`, `settings.json`) still load, which is what gives the child its providers/keys. Project-level `.pi/agents` is intentionally **not** loaded (only user-level roles).
-- **What the parent sees**: the child's full JSONL event stream is parsed by the tool; the tool result includes the answering model, the attempt trace and usage; the same trace is persisted to the session as a `pi-subagents.trace` custom entry (not sent to the LLM).
+- **What the parent sees**: the child's full JSONL event stream is parsed by the tool; the tool result includes the answering model, the attempt trace and usage; the same trace is persisted to the session as a `pi-subagents.trace` custom entry (not sent to the LLM). With `verboseLog` (see above) the full tool-call trail goes to a JSONL file, and only its path reaches the result text.
 - **Routing decisions**: virtual-model routing state (`excluded` list) is stored by pi on the session branch (`pi.virtual-model-state` entries) — inspectable in the session JSONL.
 
 ## Tests
@@ -160,11 +190,12 @@ npm run test:unit # unit only
 npm run test:smoke# integration against a real pi
 ```
 
-- **Unit** (`test/router.test.ts`, `test/health.test.ts`, `test/config.test.ts`): priority picks, exhaustion, cooldown math with an injectable clock, failure classification, config validation — all against mock providers, no keys.
+- **Unit** (`test/router.test.ts`, `test/health.test.ts`, `test/config.test.ts`, `test/toollog.test.ts`): priority picks, exhaustion, cooldown math with an injectable clock, failure classification, config validation, tool-log setting precedence, per-attempt log files written from a fake child JSONL stream (content, truncation, default-off, no-leak) — all against mock providers, no keys.
 - **SOCKS5** (`test/socks-fetch.test.ts`): a real minimal SOCKS5 server (RFC 1928: no-auth + username/password) started in-process; GET/POST/POST+JSON routed through the tunnel, failure surfacing, per-proxy dispatcher isolation.
 - **Smoke against real pi** (`test/smoke.pi.test.ts`): a mock OpenAI-compatible SSE endpoint + local SOCKS5 server + temp agent dir + real `pi` processes.
   - A: `pi --model roles/tester` — the virtual model routes, the dead provider fails, the request lands on the live provider through the SOCKS5 tunnel; asserts the physical model that answered and that traffic really crossed the tunnel.
   - B: parent pi (mock LLM, also via SOCKS5) calls the `subagent` tool; the child's primary provider is dead; the child falls back to the live provider; the parent receives the trace and finishes.
+  - C: the parent calls `subagent` with `verboseLog: true` and again without it; asserts the log file exists with the child's bash tool call (args + result), that the model-visible tool result contains only the file path (no tool call bodies), and that the non-verbose call creates no file.
 
 ## Limitations & risks
 

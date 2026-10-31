@@ -15,6 +15,7 @@ import {
 } from "./child.ts";
 import type { EffectiveRole, Runtime } from "./runtime.ts";
 import { formatAttempts } from "./render.ts";
+import { resolveToolLogSetting, startAttemptToolLog, type ToolLogDirective } from "./toollog.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 
@@ -28,6 +29,10 @@ export interface AttemptRecord {
         errorMessage: string | null;
         usage: ChildRunResult["usage"];
         finalText: string | null;
+        /** Tool executions observed in this attempt (counted from the child stream). */
+        toolCallCount: number;
+        /** Verbose tool-call log file of this attempt (null when logging is off). */
+        toolLogPath: string | null;
 }
 
 export interface RoleRunResult {
@@ -68,7 +73,7 @@ export async function runRoleWithFallback(
         runtime: Runtime,
         role: EffectiveRole,
         task: string,
-        options: { cwd?: string; signal?: AbortSignal },
+        options: { cwd?: string; signal?: AbortSignal; toolLog?: ToolLogDirective },
 ): Promise<RoleRunResult> {
         const cli = resolvePiCli();
         if (!cli) {
@@ -99,6 +104,19 @@ export async function runRoleWithFallback(
                 if (!pick) break;
 
                 const promptFile = writeTempPromptFile(role.name, role.systemPrompt);
+                // Verbose tool-call logging (debugging): written parent-side from the
+                // child's JSONL stream; disabled by default (see toollog.ts).
+                const attemptStartedAt = Date.now();
+                const toolLogger = options.toolLog?.enabled
+                        ? startAttemptToolLog({
+                                  directive: options.toolLog,
+                                  roleName: role.name,
+                                  attempt,
+                                  modelRef: pick.ref,
+                                  task,
+                                  cwd: options.cwd ?? role.cwd,
+                          })
+                        : null;
                 let result: ChildRunResult;
                 try {
                         result = await runChild(cli, buildChildArgs({ roleName: role.name, task, systemPromptPath: promptFile.filePath, tools: role.tools, thinking: role.thinking }), {
@@ -106,10 +124,21 @@ export async function runRoleWithFallback(
                                 signal: options.signal,
                                 timeoutMs: role.timeoutMs,
                                 env: { PI_SUBAGENTS_EXCLUDE: [...exclude].join(",") },
+                                collectToolEvents: toolLogger !== null,
+                                onEvent: toolLogger ? (event) => toolLogger.onChildEvent(event) : undefined,
                         });
                 } finally {
                         cleanupTempPromptFile(promptFile);
                 }
+                toolLogger?.finish({
+                        exitCode: result.exitCode,
+                        timedOut: result.timedOut,
+                        aborted: result.aborted,
+                        stopReason: result.stopReason,
+                        errorMessage: result.errorMessage,
+                        durationMs: Date.now() - attemptStartedAt,
+                        toolCallCount: result.toolResultCount,
+                });
 
                 totalUsage.input += result.usage.input;
                 totalUsage.output += result.usage.output;
@@ -130,6 +159,8 @@ export async function runRoleWithFallback(
                         errorMessage,
                         usage: result.usage,
                         finalText: result.finalText,
+                        toolCallCount: result.toolResultCount,
+                        toolLogPath: toolLogger?.path ?? null,
                 });
 
                 if (options.signal?.aborted) {
@@ -177,6 +208,12 @@ const SubagentParams = Type.Object({
         task: Type.Optional(Type.String({ description: "Task for single mode" })),
         tasks: Type.Optional(Type.Array(TaskItem, { description: "Parallel mode: array of {role, task} (max 8)" })),
         cwd: Type.Optional(Type.String({ description: "Optional working directory (single mode)" })),
+        verboseLog: Type.Optional(
+                Type.Boolean({
+                        description:
+                                "Write a verbose tool-call log for debugging: every child tool call (name, arguments, result or error) is appended to a JSONL file under <agentDir>/pi-subagents/toollogs/. The tool result returns the file path only. Default: off.",
+                }),
+        ),
 });
 
 export function registerSubagentTool(pi: ExtensionAPI, runtime: Runtime): void {
@@ -188,6 +225,7 @@ export function registerSubagentTool(pi: ExtensionAPI, runtime: Runtime): void {
                         "Each role has a prioritized model fallback list (see /roles): if a provider is down, rate-limited or overloaded, the next model in the list takes over automatically.",
                         "Modes: single {role, task} or parallel {tasks: [{role, task}]} (max 8).",
                         "The tool result reports which model executed the task, every fallback attempt, and token usage.",
+                        "Set verboseLog=true to record every child tool call (name, arguments, results) to a JSONL log file and get its path back — use it when a subagent seems stuck or fails.",
                 ].join(" "),
                 promptGuidelines: [
                         "Use the subagent tool for focused subtasks (recon, planning, review, implementation) to keep the main context clean.",
@@ -224,6 +262,14 @@ export function registerSubagentTool(pi: ExtensionAPI, runtime: Runtime): void {
                                 );
                         }
 
+                        // Verbose tool-call logging: tool parameter > env > config > off.
+                        const toolLog = resolveToolLogSetting({
+                                param: params.verboseLog,
+                                env: process.env["PI_SUBAGENTS_TOOLLOG"],
+                                config: runtime.config.defaults?.toolLog,
+                                defaultDir: runtime.toolLogDir,
+                        });
+
                         if (hasTasks) {
                                 const tasks = params.tasks!;
                                 if (tasks.length > MAX_PARALLEL_TASKS) {
@@ -233,7 +279,7 @@ export function registerSubagentTool(pi: ExtensionAPI, runtime: Runtime): void {
                                         const role = runtime.getRole(item.role);
                                         if (!role)
                                                 return { ok: false as const, role: item.role, error: `Unknown role "${item.role}". Known: ${roleList(runtime)}` };
-                                        const run = await runRoleWithFallback(runtime, role, item.task, { cwd: item.cwd, signal });
+                                        const run = await runRoleWithFallback(runtime, role, item.task, { cwd: item.cwd, signal, toolLog });
                                         return { ok: true as const, role: item.role, result: run };
                                 });
                                 const allOk = results.every((r) => r.ok && r.result.ok);
@@ -245,8 +291,15 @@ export function registerSubagentTool(pi: ExtensionAPI, runtime: Runtime): void {
                                 return textResult(`Unknown role "${params.role}". Known roles: ${roleList(runtime)}. Run /roles for details.`, { knownRoles: runtime.roles().map((r) => r.name) }, true);
                         }
 
-                        const result = await runRoleWithFallback(runtime, role, params.task!, { cwd: params.cwd, signal });
-                        pi.appendEntry("pi-subagents.trace", { role: role.name, attempts: result.attempts, usage: result.usage });
+                        const result = await runRoleWithFallback(runtime, role, params.task!, { cwd: params.cwd, signal, toolLog });
+                        // appendEntry entries are durable session data EXCLUDED from the model
+                        // context (pi docs/extensions.md, state table) — safe for verbose details.
+                        pi.appendEntry("pi-subagents.trace", {
+                                role: role.name,
+                                attempts: result.attempts,
+                                usage: result.usage,
+                                toolLogs: result.attempts.map((a) => a.toolLogPath).filter((p): p is string => p !== null),
+                        });
                         return textResult(formatSingleResult(result), { role: role.name, attempts: result.attempts, usage: result.usage }, !result.ok && !result.aborted);
                 },
         });
@@ -266,17 +319,34 @@ function textResult(text: string, details: unknown, isError: boolean) {
 }
 
 export function formatSingleResult(result: RoleRunResult): string {
+        const logLines = toolLogLines(result.attempts);
         if (result.ok) {
                 const usage = result.usage;
                 const lines = [
                         `[subagent role=${result.role}] done`,
                         `model: ${result.modelUsed ?? "?"} · attempts: ${result.attempts.length} · in ${usage.input} out ${usage.output} ctx ${usage.totalTokens} $${usage.cost.toFixed(4)}`,
+                        ...logLines,
                         `---`,
                         result.finalText ?? "(no output)",
                 ];
                 return lines.join("\n");
         }
-        return [`[subagent role=${result.role}] FAILED`, formatAttempts(result.attempts), ...(result.aborted ? ["(aborted)"] : [])].join("\n");
+        return [
+                `[subagent role=${result.role}] FAILED`,
+                formatAttempts(result.attempts),
+                ...logLines,
+                ...(result.aborted ? ["(aborted)"] : []),
+        ].join("\n");
+}
+
+/** Pointer lines for verbose tool-call logs (path only — never tool call bodies). */
+function toolLogLines(attempts: AttemptRecord[]): string[] {
+        const numbered = attempts
+                .map((attempt, index) => ({ n: index + 1, path: attempt.toolLogPath }))
+                .filter((entry): entry is { n: number; path: string } => entry.path !== null);
+        if (numbered.length === 0) return [];
+        const simple = numbered.length === 1 && attempts.length === 1;
+        return numbered.map((entry) => (simple ? `tool log: ${entry.path}` : `tool log (attempt ${entry.n}): ${entry.path}`));
 }
 
 export function formatParallelResult(

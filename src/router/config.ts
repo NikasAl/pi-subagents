@@ -199,6 +199,14 @@ export function parseConfig(document: unknown): SubagentsConfig {
                                 throw new ConfigError("defaults.recoverySuccesses must be a positive integer");
                         config.defaults.recoverySuccesses = defaults.recoverySuccesses;
                 }
+                if (defaults.toolLog !== undefined) {
+                        const value = defaults.toolLog;
+                        if (typeof value !== "boolean" && typeof value !== "string")
+                                throw new ConfigError('defaults.toolLog must be a boolean or a string ("on", "off", or a directory/*.jsonl file path)');
+                        if (typeof value === "string" && value.trim() === "")
+                                throw new ConfigError("defaults.toolLog must not be an empty string");
+                        config.defaults.toolLog = value;
+                }
         }
         return config;
 }

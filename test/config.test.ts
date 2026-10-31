@@ -70,6 +70,20 @@ describe("parseConfig", () => {
                 expect(() => parseConfig({ roles: { r: { models: ["a/b"], maxAttempts: 0 } } })).toThrow(/maxAttempts/);
                 expect(() => parseConfig({ roles: { r: { models: ["a/b"], sticky: "sometimes" } } })).toThrow(/sticky/);
         });
+
+        it("accepts defaults.toolLog as boolean, on/off or path", () => {
+                expect(parseConfig({ defaults: { toolLog: true } }).defaults?.toolLog).toBe(true);
+                expect(parseConfig({ defaults: { toolLog: false } }).defaults?.toolLog).toBe(false);
+                expect(parseConfig({ defaults: { toolLog: "on" } }).defaults?.toolLog).toBe("on");
+                expect(parseConfig({ defaults: { toolLog: "/var/log/toolcalls" } }).defaults?.toolLog).toBe("/var/log/toolcalls");
+                expect(parseConfig({ defaults: { toolLog: "/tmp/toolcalls.jsonl" } }).defaults?.toolLog).toBe("/tmp/toolcalls.jsonl");
+        });
+
+        it("rejects malformed defaults.toolLog", () => {
+                expect(() => parseConfig({ defaults: { toolLog: 1 } })).toThrow(/toolLog/);
+                expect(() => parseConfig({ defaults: { toolLog: "" } })).toThrow(/toolLog/);
+                expect(() => parseConfig({ defaults: { toolLog: null } })).toThrow(/toolLog/);
+        });
 });
 
 describe("loadConfig", () => {

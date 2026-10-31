@@ -24,12 +24,44 @@ export interface ChildMessageSummary {
         };
 }
 
+/** One child tool call, collected when RunChildOptions.collectToolEvents is on. */
+export interface ChildToolCallEvent {
+        toolCallId: string;
+        toolName: string;
+        args: unknown;
+        isError?: boolean;
+        durationMs?: number;
+        /** Tool result; capped in memory (see MAX_IN_MEMORY_RESULT_JSON). */
+        result?: unknown;
+        resultTruncated?: boolean;
+}
+
+/** In-memory cap for a collected tool result (the log FILE is never truncated). */
+const MAX_IN_MEMORY_RESULT_JSON = 64 * 1024;
+
+function boundedResult(value: unknown): { result?: unknown; resultTruncated?: boolean } {
+        if (value === undefined) return {};
+        let json: string;
+        try {
+                json = JSON.stringify(value) ?? "";
+        } catch {
+                return { result: String(value), resultTruncated: true };
+        }
+        if (json.length <= MAX_IN_MEMORY_RESULT_JSON) return { result: value };
+        return {
+                result: { truncated: true, originalBytes: json.length, preview: json.slice(0, 2000) },
+                resultTruncated: true,
+        };
+}
+
 export interface ChildRunResult {
         exitCode: number;
         /** Assistant messages observed (final responses), in order. */
         assistantMessages: ChildMessageSummary[];
-        /** Tool result texts observed (for transparency/debugging). */
+        /** Tool results observed (for transparency/debugging). */
         toolResultCount: number;
+        /** Tool calls with args/results; populated only when collectToolEvents is on. */
+        toolCalls: ChildToolCallEvent[];
         stderr: string;
         /** Last assistant text, if any. */
         finalText: string | null;
@@ -51,6 +83,8 @@ export interface RunChildOptions {
         env?: Record<string, string>;
         /** Called for each parsed JSONL record (transparency hook). */
         onEvent?: (event: Record<string, unknown>) => void;
+        /** Collect tool calls (name/args/result) into result.toolCalls. */
+        collectToolEvents?: boolean;
 }
 
 /** Find `<root>/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js` walking up from `fromDir`. */
@@ -214,6 +248,7 @@ export function runChild(cli: { command: string; baseArgs: string[] }, args: str
                         exitCode: -1,
                         assistantMessages: [],
                         toolResultCount: 0,
+                        toolCalls: [],
                         stderr: "",
                         finalText: null,
                         modelUsed: null,
@@ -227,6 +262,7 @@ export function runChild(cli: { command: string; baseArgs: string[] }, args: str
                 let buffer = "";
                 let settled = false;
                 let timeout: NodeJS.Timeout | null = null;
+                const openCalls = new Map<string, ChildToolCallEvent>();
                 const abortHandler = () => {
                         result.aborted = true;
                         proc.kill("SIGTERM");
@@ -269,6 +305,32 @@ export function runChild(cli: { command: string; baseArgs: string[] }, args: str
                         }
                         options.onEvent?.(event);
                         const type = event.type as string | undefined;
+
+                        if (type === "tool_execution_start") {
+                                if (options.collectToolEvents) {
+                                        const call: ChildToolCallEvent = {
+                                                toolCallId: String(event.toolCallId ?? ""),
+                                                toolName: String(event.toolName ?? ""),
+                                                args: event.args,
+                                        };
+                                        result.toolCalls.push(call);
+                                        openCalls.set(call.toolCallId, call);
+                                }
+                                return;
+                        }
+                        if (type === "tool_execution_end") {
+                                result.toolResultCount++;
+                                if (options.collectToolEvents) {
+                                        const toolCallId = String(event.toolCallId ?? "");
+                                        const call = openCalls.get(toolCallId) ?? { toolCallId, toolName: String(event.toolName ?? ""), args: undefined };
+                                        openCalls.delete(toolCallId);
+                                        call.isError = event.isError === true;
+                                        if (typeof event.durationMs === "number") call.durationMs = event.durationMs;
+                                        Object.assign(call, boundedResult(event.result));
+                                        if (!openCalls.has(toolCallId) && !result.toolCalls.includes(call)) result.toolCalls.push(call);
+                                }
+                                return;
+                        }
 
                         if (type === "message_end" && event.message) {
                                 const message = event.message as Record<string, unknown>;
@@ -313,8 +375,6 @@ export function runChild(cli: { command: string; baseArgs: string[] }, args: str
                                         result.stopReason = summary.stopReason ?? result.stopReason;
                                         if (summary.errorMessage) result.errorMessage = summary.errorMessage;
                                 }
-                        } else if (type === "tool_result_end") {
-                                result.toolResultCount++;
                         }
                 };
 
