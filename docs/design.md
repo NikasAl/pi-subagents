@@ -35,7 +35,13 @@ Reference sources: pi 1.4.0 (`@earendil-works/pi-coding-agent@1.4.0`) docs and d
 - In pi 1.4.0, `route(request)` is invoked with a **single argument** (dist/core/model-runtime.js: `virtual.route({...})`; `definition.route(request)`). The `route(request, ctx)` form shown in docs/examples receives `ctx === undefined` at runtime.
 - Therefore the ModelRegistry is captured from the first available context (`session_start` handler, then tool/command contexts) and stored on the Runtime; routing before that throws a precise error (routing only happens once a session exists, so this is defensive).
 
-## D6. What is intentionally out of scope
+## D6. Debug artifacts (tool log, context report) are parent-side, pointer-only, default-off
+
+- The child runs with `--no-session`; the only observers are the parent-side parsers of the child's JSONL stream (runChild's `onEvent`). Writing logs in the child would contradict "no session files" and complicate isolation.
+- Both artifacts follow the same mechanics: per-attempt JSONL file(s) created `0600` and appended incrementally (a hanging child can be tailed live), a single pointer line in the model-visible tool result (`tool log: <path>` / `context report: <path>`), paths repeated in the `pi-subagents.trace` appendEntry (documented by pi as durable data excluded from model context). Default OFF; the context report follows the tool-log switch unless `PI_SUBAGENTS_CTXLOG` / `defaults.ctxLog` override it.
+- The context report deliberately stores **only numbers** (sizes as serialized chars / 4), never tool result bodies — bodies already live in the tool log of the same attempt, and the report must stay safe to share. Per-turn context size is estimated as `input + cacheRead + cacheWrite` straight from provider-reported usage on `message_end` (what the provider actually had to read that request).
+
+## D7. What is intentionally out of scope
 
 - Chain mode (scout→planner→worker as one tool call): the parent model composes the same flow with two tool calls, and the level-1 fallback/health logic is easier to keep correct for single/parallel. Can be added later without breaking config.
 - Non-chat APIs (Google, Bedrock, WebSocket transports) for SOCKS5: fetch injection is verified only for the three APIs above; silently tunneling unknown transports would be worse than refusing.

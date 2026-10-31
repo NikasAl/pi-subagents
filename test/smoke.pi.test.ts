@@ -273,7 +273,9 @@ describe("smoke: real pi sandbox", () => {
                         expect(plainText).not.toContain("tool log:");
                         const toolLogDir = path.join(agentDir, "pi-subagents", "toollogs");
                         expect(fs.existsSync(toolLogDir)).toBe(true);
-                        const files = fs.readdirSync(toolLogDir).filter((f) => f.endsWith(".jsonl"));
+                        // The context report inherits the directory target, so exactly one
+                        // toollog file and one .ctx.jsonl report exist after the two runs.
+                        const files = fs.readdirSync(toolLogDir).filter((f) => f.endsWith(".jsonl") && !f.endsWith(".ctx.jsonl"));
                         expect(files.length, `tool log files: ${files.join(", ")}`).toBe(1);
 
                         // Trace entry (appendEntry — excluded from the model context per pi docs):
@@ -283,6 +285,52 @@ describe("smoke: real pi sandbox", () => {
                         expect(tracePayload).toContain("pi-subagents.trace");
                         expect(tracePayload).toContain(logPath!);
                         expect(tracePayload).not.toContain("TOOLLOG-MARKER-1");
+
+                        // (d) The verbose run also produced a per-run context report:
+                        // same switch (verboseLog), own file, numbers only — no bodies.
+                        expect(verboseText).toContain("context report: ");
+                        const ctxPath = verboseText.match(/context report: (\S+)/)?.[1];
+                        expect(ctxPath, `verbose result: ${verboseText}`).toBeTruthy();
+                        expect(ctxPath).toMatch(/\.ctx\.jsonl$/);
+                        const ctxLines = fs
+                                .readFileSync(ctxPath!, "utf-8")
+                                .split("\n")
+                                .filter((l) => l.trim())
+                                .map((l) => JSON.parse(l) as Record<string, unknown>);
+                        expect(ctxLines[0]!.type).toBe("run_start");
+                        expect(ctxLines[ctxLines.length - 1]!.type).toBe("report");
+                        expect(fs.statSync(ctxPath!).mode & 0o777).toBe(0o600);
+                        const report = ctxLines[ctxLines.length - 1] as Record<string, unknown>;
+                        expect(report.schema).toBe("pi-subagents.ctx-report/1");
+                        const reportTotals = report.totals as Record<string, unknown>;
+                        expect(Number(reportTotals.requests)).toBeGreaterThanOrEqual(2); // bash call + final answer
+                        expect(Number(reportTotals.input)).toBeGreaterThan(0);
+                        const reportBudget = report.budget as Record<string, unknown>;
+                        expect(Number(reportBudget.systemPromptTokens)).toBeGreaterThan(0);
+                        expect(Number(reportBudget.toolResultTokens)).toBeGreaterThan(0);
+                        const reportTurns = report.turns as Array<Record<string, unknown>>;
+                        expect(reportTurns.length).toBe(Number(reportTotals.requests));
+                        for (const turn of reportTurns) {
+                                expect(Number(turn.contextEstimate)).toBe(
+                                        Number(turn.input) + Number(turn.cacheRead) + Number(turn.cacheWrite),
+                                );
+                        }
+                        // Numbers only: no tool result bodies, no verbose-log markers.
+                        const ctxRaw = fs.readFileSync(ctxPath!, "utf-8");
+                        expect(ctxRaw).not.toContain("TOOLLOG-MARKER-1");
+                        expect(ctxRaw).not.toContain('"command"');
+                        // The model-visible tool result carries the pointer line only.
+                        expect(verboseText).not.toContain("chars/4");
+                        expect(tracePayload).toContain(ctxPath!);
+
+                        // (e) Default run: no context report either. Under a directory toollog
+                        // target the report sits next to it (one debug folder per session);
+                        // the default ctxlogs dir is never created here.
+                        const ctxLogDir = path.join(agentDir, "pi-subagents", "ctxlogs");
+                        expect(fs.existsSync(ctxLogDir)).toBe(false);
+                        const ctxFiles = fs.readdirSync(toolLogDir).filter((f) => f.endsWith(".ctx.jsonl"));
+                        expect(ctxFiles.length, `ctx report files: ${ctxFiles.join(", ")}`).toBe(1);
+                        expect(plainText).not.toContain("context report");
                 },
                 240_000,
         );

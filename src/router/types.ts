@@ -150,6 +150,14 @@ export interface SubagentsConfig {
                  * Overridden by PI_SUBAGENTS_TOOLLOG and the tool's verboseLog parameter.
                  */
                 toolLog?: boolean | string;
+                /**
+                 * Per-run context report ("what fills the subagent's context").
+                 * Default: inherit from toolLog (on iff tool logging is on).
+                 * true = default dir (<agentDir>/pi-subagents/ctxlogs), false = off,
+                 * "on"/"off", or a path (dir; *.jsonl/*.log = exact file runs append to).
+                 * Overridden by PI_SUBAGENTS_CTXLOG.
+                 */
+                ctxLog?: boolean | string;
         };
 }
 

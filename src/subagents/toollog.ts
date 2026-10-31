@@ -90,17 +90,17 @@ export function toolLogStamp(date: Date = new Date()): string {
 }
 
 /** Choose the log file for one attempt, avoiding collisions with parallel runs. */
-export function attemptLogFilePath(dir: string, roleName: string, attempt: number, now: Date = new Date()): string {
+export function attemptLogFilePath(dir: string, roleName: string, attempt: number, now: Date = new Date(), ext = ".jsonl"): string {
         const safeRole = roleName.replace(/[^\w.-]+/g, "_");
         const base = `${toolLogStamp(now)}-${safeRole}-attempt${attempt}`;
-        let candidate = path.join(dir, `${base}.jsonl`);
+        let candidate = path.join(dir, `${base}${ext}`);
         if (!fs.existsSync(candidate)) return candidate;
         // Parallel tasks of the same role can start within the same millisecond:
         // disambiguate with the pid, then a counter.
-        candidate = path.join(dir, `${base}-${process.pid}.jsonl`);
+        candidate = path.join(dir, `${base}-${process.pid}${ext}`);
         if (!fs.existsSync(candidate)) return candidate;
         for (let k = 2; ; k++) {
-                candidate = path.join(dir, `${base}-${process.pid}-${k}.jsonl`);
+                candidate = path.join(dir, `${base}-${process.pid}-${k}${ext}`);
                 if (!fs.existsSync(candidate)) return candidate;
         }
 }

@@ -104,6 +104,8 @@ export class Runtime {
         readonly parallelLimit: number;
         /** Default directory for verbose tool-call logs. */
         readonly toolLogDir: string;
+        /** Default directory for per-run context reports. */
+        readonly ctxLogDir: string;
         modelRegistry: ModelRegistry | null = null;
 
         private readonly rolesByName = new Map<string, EffectiveRole>();
@@ -133,6 +135,7 @@ export class Runtime {
                 this.configError = configError;
                 this.parallelLimit = config.defaults?.parallel ?? 4;
                 this.toolLogDir = path.join(this.agentDir, "pi-subagents", "toollogs");
+                this.ctxLogDir = path.join(this.agentDir, "pi-subagents", "ctxlogs");
 
                 this.health = new HealthTracker(undefined, {
                         cooldowns: config.defaults?.cooldowns ?? {},

@@ -7,12 +7,13 @@
  *  - one virtual model per role under `roles/<name>` (request-level fallback,
  *    see src/subagents/virtual-models.ts);
  *  - the `subagent` tool (process-level fallback + isolated child sessions);
- *  - the `/roles` command for observability.
+ *  - the `/roles` and `/ctx` commands for observability.
  *
  * Config: `<agentDir>/pi-subagents.json` (override with PI_SUBAGENTS_CONFIG).
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerProxiedProviders } from "./socks/provider.ts";
+import { registerCtxCommand } from "./subagents/ctx-command.ts";
 import { registerSubagentTool } from "./subagents/tool.ts";
 import { registerRoleVirtualModels } from "./subagents/virtual-models.ts";
 import { Runtime } from "./subagents/runtime.ts";
@@ -44,6 +45,7 @@ export default function (pi: ExtensionAPI): void {
 	}
 
 	registerSubagentTool(pi, runtime);
+	registerCtxCommand(pi);
 
 	pi.registerCommand("roles", {
 		description: "Show pi-subagents roles, model fallback lists and provider health",

@@ -298,6 +298,7 @@ describe("no leak of tool call bodies into the parent context", () => {
                                 finalText: "ALL-DONE",
                                 toolCallCount: 1,
                                 toolLogPath: "/logs/2026-02-11T09-15-33-512Z-scout-attempt1.jsonl",
+                                ctxLogPath: null,
                         },
                 ];
                 const result: RoleRunResult = {
@@ -341,6 +342,7 @@ describe("no leak of tool call bodies into the parent context", () => {
                                 finalText: "ALL-DONE",
                                 toolCallCount: 1,
                                 toolLogPath: null,
+                                ctxLogPath: null,
                         },
                 ];
                 const text = formatSingleResult({

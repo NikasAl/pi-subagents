@@ -207,6 +207,14 @@ export function parseConfig(document: unknown): SubagentsConfig {
                                 throw new ConfigError("defaults.toolLog must not be an empty string");
                         config.defaults.toolLog = value;
                 }
+                if (defaults.ctxLog !== undefined) {
+                        const value = defaults.ctxLog;
+                        if (typeof value !== "boolean" && typeof value !== "string")
+                                throw new ConfigError('defaults.ctxLog must be a boolean or a string ("on", "off", or a directory/*.jsonl file path)');
+                        if (typeof value === "string" && value.trim() === "")
+                                throw new ConfigError("defaults.ctxLog must not be an empty string");
+                        config.defaults.ctxLog = value;
+                }
         }
         return config;
 }
