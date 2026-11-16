@@ -16,6 +16,7 @@ const ROLES = [
         { name: "scout", purpose: "Fast read-only recon of the codebase", body: "You are scout." },
         { name: "worker", purpose: "Implements one task end-to-end", body: "You are worker." },
         { name: "reviewer", purpose: "Reviews changes and ranks findings by severity", body: "You are reviewer." },
+        { name: "vision", purpose: "Inspects image files and reports findings as text", body: "You are vision." },
 ];
 
 function makeRuntime(): Runtime {
@@ -111,10 +112,12 @@ describe("role resolution", () => {
                 expect(resolveRole(runtime, "review")?.role.name).toBe("reviewer");
                 expect(resolveRole(runtime, "coder")?.role.name).toBe("worker");
                 expect(resolveRole(runtime, "implementation")?.role.name).toBe("worker");
+                expect(resolveRole(runtime, "image-check")?.role.name).toBe("vision");
+                expect(resolveRole(runtime, "screenshots")?.role.name).toBe("vision");
         });
 
         it("reports unknown names instead of guessing", () => {
-                expect(resolveRole(makeRuntime(), "vision")).toBeNull();
+                expect(resolveRole(makeRuntime(), "oracle")).toBeNull();
         });
 });
 
@@ -123,7 +126,7 @@ describe("registration and error surface", () => {
                 const tool = captureTool(makeRuntime());
                 const description = String(tool.description);
                 for (const role of ROLES) expect(description).toContain(`- ${role.name}: ${role.purpose}`);
-                expect(JSON.stringify(tool.parameters)).toContain('"enum":["reviewer","scout","worker"]');
+                expect(JSON.stringify(tool.parameters)).toContain('"enum":["reviewer","scout","vision","worker"]');
         });
 
         it("names the subagent tool and the roster in its prompt guidelines", () => {
@@ -143,10 +146,10 @@ describe("registration and error surface", () => {
                         onUpdate: undefined,
                         ctx: unknown,
                 ) => Promise<{ content: Array<{ text: string }>; isError?: boolean }>;
-                const result = await execute("call-1", { role: "vision", task: "look at the screenshots" }, undefined, undefined, {});
+                const result = await execute("call-1", { role: "oracle", task: "look at the screenshots" }, undefined, undefined, {});
                 expect(result.isError).toBe(true);
                 const text = result.content[0]!.text;
-                expect(text).toContain('Unknown role "vision"');
+                expect(text).toContain('Unknown role "oracle"');
                 for (const role of ROLES) expect(text).toContain(`${role.name} — ${role.purpose}`);
         });
 

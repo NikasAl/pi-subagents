@@ -245,6 +245,13 @@ const ROLE_ALIASES: Record<string, string> = {
         executor: "worker",
         review: "reviewer",
         critique: "reviewer",
+        image: "vision",
+        images: "vision",
+        "image-check": "vision",
+        screenshot: "vision",
+        screenshots: "vision",
+        visual: "vision",
+        inspect: "vision",
 };
 
 function oneLine(text: string): string {
