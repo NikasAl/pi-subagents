@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { classifyFailure } from "../router/errors.ts";
 import { FallbackRouter } from "../router/router.ts";
@@ -226,41 +227,117 @@ export async function runRoleWithFallback(
         };
 }
 
-const TaskItem = Type.Object({
-        role: Type.String({ description: "Role name (see /roles)" }),
-        task: Type.String({ description: "Exact task for this subagent" }),
-        cwd: Type.Optional(Type.String({ description: "Optional working directory for this task" })),
-});
+/**
+ * Near-synonyms the model reaches for when the roster is not in its context
+ * (observed in real sessions: `recon`, `review`, `coder`, `implementation`).
+ * Resolved instead of failing the call, so a wrong guess costs no round trip.
+ */
+const ROLE_ALIASES: Record<string, string> = {
+        recon: "scout",
+        research: "scout",
+        explore: "scout",
+        investigate: "scout",
+        plan: "planner",
+        coder: "worker",
+        dev: "worker",
+        implement: "worker",
+        implementation: "worker",
+        executor: "worker",
+        review: "reviewer",
+        critique: "reviewer",
+};
 
-const SubagentParams = Type.Object({
-        role: Type.Optional(Type.String({ description: "Role name for single mode (see /roles)" })),
-        task: Type.Optional(Type.String({ description: "Task for single mode" })),
-        tasks: Type.Optional(Type.Array(TaskItem, { description: "Parallel mode: array of {role, task} (max 8)" })),
-        cwd: Type.Optional(Type.String({ description: "Optional working directory (single mode)" })),
-        verboseLog: Type.Optional(
-                Type.Boolean({
-                        description:
-                                "Write debugging artifacts for this run: (1) a verbose tool-call log — every child tool call (name, arguments, result or error) appended to a JSONL file, and (2) a per-run context report — per-turn input/cacheRead/cacheWrite/output, estimated context growth and the largest context consumers (token estimate). Files go under <agentDir>/pi-subagents/; the tool result returns their paths only. Default: off.",
-                }),
-        ),
-});
+function oneLine(text: string): string {
+        return text.replace(/\s+/g, " ").trim();
+}
+
+/** Alphabetical, deterministic order (config order depends on how roles were declared). */
+function sortedRoles(runtime: Runtime): EffectiveRole[] {
+        return [...runtime.roles()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** `name — purpose; name — purpose` — the roster shown to the model in errors. */
+export function roleRoster(runtime: Runtime): string {
+        const roles = sortedRoles(runtime);
+        if (roles.length === 0) return "(no roles configured)";
+        return roles.map((role) => `${role.name} — ${oneLine(role.description)}`).join("; ");
+}
+
+/**
+ * Resolve a requested role: exact name, then case-insensitive, then a known
+ * near-synonym. Unknown names are reported (with the roster) instead of failing.
+ */
+export function resolveRole(runtime: Runtime, requested: string): { role: EffectiveRole; correctedFrom: string | null } | null {
+        const wanted = requested.trim();
+        const exact = runtime.getRole(wanted);
+        if (exact) return { role: exact, correctedFrom: null };
+        const lowered = wanted.toLowerCase();
+        const caseMatch = runtime.roles().find((role) => role.name.toLowerCase() === lowered);
+        if (caseMatch) return { role: caseMatch, correctedFrom: wanted };
+        const alias = ROLE_ALIASES[lowered];
+        const aliasMatch = alias ? runtime.getRole(alias) : undefined;
+        if (aliasMatch) return { role: aliasMatch, correctedFrom: wanted };
+        return null;
+}
+
+/** Tool parameters; `role` is a real string enum of the current roster, not free text. */
+export function buildParams(roleNames: string[]) {
+        const roster = roleNames.length > 0 ? roleNames.join(", ") : "(none configured)";
+        const roleSchema = (description: string) =>
+                roleNames.length > 0 ? StringEnum(roleNames, { description }) : Type.String({ description });
+
+        const TaskItem = Type.Object({
+                role: roleSchema(`Role for this task. One of: ${roster}`),
+                task: Type.String({ description: "Exact task for this subagent" }),
+                cwd: Type.Optional(Type.String({ description: "Optional working directory for this task" })),
+        });
+
+        return Type.Object({
+                role: Type.Optional(roleSchema(`Role for single mode. One of: ${roster}`)),
+                task: Type.Optional(Type.String({ description: "Task for single mode" })),
+                tasks: Type.Optional(
+                        Type.Array(TaskItem, { description: `Parallel mode: array of {role, task} (max ${MAX_PARALLEL_TASKS})` }),
+                ),
+                cwd: Type.Optional(Type.String({ description: "Optional working directory (single mode)" })),
+                verboseLog: Type.Optional(
+                        Type.Boolean({
+                                description:
+                                        "Write debugging artifacts for this run: (1) a verbose tool-call log — every child tool call (name, arguments, result or error) appended to a JSONL file, and (2) a per-run context report — per-turn input/cacheRead/cacheWrite/output, estimated context growth and the largest context consumers (token estimate). Files go under <agentDir>/pi-subagents/; the tool result returns their paths only. Default: off.",
+                        }),
+                ),
+        });
+}
+
+/** Tool description carrying the role roster: the model must never guess role names. */
+export function buildSubagentDescription(runtime: Runtime): string {
+        const roles = sortedRoles(runtime);
+        const roster =
+                roles.length > 0
+                        ? roles.map((role) => `- ${role.name}: ${oneLine(role.description)}`).join("\n")
+                        : "- (none configured — add <agentDir>/agents/<role>.md or roles.<name>.models)";
+        return [
+                "Delegate a task to a role-based subagent running in an isolated pi child process.",
+                "Roles (pick by purpose; never invent a name):",
+                roster,
+                "Each role has a prioritized model fallback list (see /roles): if a provider is down, rate-limited or overloaded, the next model in the list takes over automatically.",
+                "The child is isolated: it does not see this conversation, AGENTS.md/project context files or skills, and it only has the role's whitelisted tools. Put absolute paths, constraints and the expected output format into task.",
+                `Modes: single {role, task} or parallel {tasks: [{role, task}]} (max ${MAX_PARALLEL_TASKS}).`,
+                "The tool result reports which model executed the task, every fallback attempt, and token usage.",
+                "Set verboseLog=true to record every child tool call (name, arguments, results) to a JSONL log file plus a per-run context report (per-turn context growth and largest consumers), and get their paths back — use it when a subagent seems stuck or fails.",
+        ].join("\n");
+}
 
 export function registerSubagentTool(pi: ExtensionAPI, runtime: Runtime): void {
         pi.registerTool({
                 name: "subagent",
                 label: "Subagent",
-                description: [
-                        "Delegate a task to a role-based subagent running in an isolated pi child process.",
-                        "Each role has a prioritized model fallback list (see /roles): if a provider is down, rate-limited or overloaded, the next model in the list takes over automatically.",
-                        "Modes: single {role, task} or parallel {tasks: [{role, task}]} (max 8).",
-                        "The tool result reports which model executed the task, every fallback attempt, and token usage.",
-                        "Set verboseLog=true to record every child tool call (name, arguments, results) to a JSONL log file plus a per-run context report (per-turn context growth and largest consumers), and get their paths back — use it when a subagent seems stuck or fails.",
-                ].join(" "),
+                description: buildSubagentDescription(runtime),
                 promptGuidelines: [
                         "Use the subagent tool for focused subtasks (recon, planning, review, implementation) to keep the main context clean.",
-                        "Give the subagent a self-contained task: paths, constraints and the exact expected result. Do not assume the subagent sees this conversation.",
+                        "Pick the subagent tool role from the roster in its description, by the role's purpose — never invent a role name.",
+                        "Give the subagent tool a self-contained task: the child gets no conversation history, no AGENTS.md and no skills, so pass paths, constraints and the exact expected result.",
                 ],
-                parameters: SubagentParams,
+                parameters: buildParams(sortedRoles(runtime).map((role) => role.name)),
 
                 async execute(_toolCallId, params, signal, _onUpdate, ctx: ExtensionToolContext) {
                         runtime.modelRegistry ??= ctx.modelRegistry;
@@ -277,7 +354,7 @@ export function registerSubagentTool(pi: ExtensionAPI, runtime: Runtime): void {
                         const hasTasks = (params.tasks?.length ?? 0) > 0;
                         if (hasSingle === hasTasks) {
                                 return textResult(
-                                        `Invalid parameters: provide exactly one of {role, task} (single mode) or {tasks} (parallel mode). Known roles: ${roleList(runtime)}.`,
+                                        `Invalid parameters: provide exactly one of {role, task} (single mode) or {tasks} (parallel mode). Available roles: ${roleRoster(runtime)}.`,
                                         { knownRoles: runtime.roles().map((r) => r.name) },
                                         true,
                                 );
@@ -314,39 +391,48 @@ export function registerSubagentTool(pi: ExtensionAPI, runtime: Runtime): void {
                                         return textResult(`Too many parallel tasks (${tasks.length}); max is ${MAX_PARALLEL_TASKS}.`, {}, true);
                                 }
                                 const results = await mapWithConcurrencyLimit(tasks, runtime.parallelLimit, async (item) => {
-                                        const role = runtime.getRole(item.role);
-                                        if (!role)
-                                                return { ok: false as const, role: item.role, error: `Unknown role "${item.role}". Known: ${roleList(runtime)}` };
-                                        const run = await runRoleWithFallback(runtime, role, item.task, { cwd: item.cwd, signal, toolLog, ctxLog });
-                                        return { ok: true as const, role: item.role, result: run };
+                                        const resolved = resolveRole(runtime, item.role);
+                                        if (!resolved)
+                                                return { ok: false as const, role: item.role, error: `Unknown role "${item.role}". Available roles: ${roleRoster(runtime)}` };
+                                        const run = await runRoleWithFallback(runtime, resolved.role, item.task, { cwd: item.cwd, signal, toolLog, ctxLog });
+                                        return { ok: true as const, role: resolved.role.name, note: correctionNote(resolved), result: run };
                                 });
                                 const allOk = results.every((r) => r.ok && r.result.ok);
                                 return textResult(formatParallelResult(results), { tasks: results }, !allOk && results.some((r) => r.ok && !r.result.ok && !r.result.aborted));
                         }
 
-                        const role = runtime.getRole(params.role!);
-                        if (!role) {
-                                return textResult(`Unknown role "${params.role}". Known roles: ${roleList(runtime)}. Run /roles for details.`, { knownRoles: runtime.roles().map((r) => r.name) }, true);
+                        const resolved = resolveRole(runtime, params.role!);
+                        if (!resolved) {
+                                return textResult(
+                                        `Unknown role "${params.role}". Available roles: ${roleRoster(runtime)}.`,
+                                        { knownRoles: runtime.roles().map((r) => r.name) },
+                                        true,
+                                );
                         }
+                        const role = resolved.role;
 
                         const result = await runRoleWithFallback(runtime, role, params.task!, { cwd: params.cwd, signal, toolLog, ctxLog });
                         // appendEntry entries are durable session data EXCLUDED from the model
                         // context (pi docs/extensions.md, state table) — safe for verbose details.
                         pi.appendEntry("pi-subagents.trace", {
+                                requestedRole: params.role,
                                 role: role.name,
+                                correctedFrom: resolved.correctedFrom,
                                 attempts: result.attempts,
                                 usage: result.usage,
                                 toolLogs: result.attempts.map((a) => a.toolLogPath).filter((p): p is string => p !== null),
                                 ctxLogs: result.attempts.map((a) => a.ctxLogPath).filter((p): p is string => p !== null),
                         });
-                        return textResult(formatSingleResult(result), { role: role.name, attempts: result.attempts, usage: result.usage }, !result.ok && !result.aborted);
+                        const note = correctionNote(resolved);
+                        const text = note ? `${note}\n${formatSingleResult(result)}` : formatSingleResult(result);
+                        return textResult(text, { role: role.name, attempts: result.attempts, usage: result.usage }, !result.ok && !result.aborted);
                 },
         });
 }
 
-function roleList(runtime: Runtime): string {
-        const roles = runtime.roles();
-        return roles.length > 0 ? roles.map((r) => r.name).join(", ") : "(none)";
+/** One-line note when the requested role name was mapped onto a real role. */
+function correctionNote(resolved: { role: EffectiveRole; correctedFrom: string | null }): string | null {
+        return resolved.correctedFrom === null ? null : `note: role "${resolved.correctedFrom}" resolved to "${resolved.role.name}"`;
 }
 
 function textResult(text: string, details: unknown, isError: boolean) {
@@ -392,13 +478,14 @@ function pointerLines(attempts: AttemptRecord[], pick: (attempt: AttemptRecord) 
 }
 
 export function formatParallelResult(
-        results: Array<{ ok: boolean; role: string; result?: RoleRunResult; error?: string }>,
+        results: Array<{ ok: boolean; role: string; note?: string | null; result?: RoleRunResult; error?: string }>,
 ): string {
         const done = results.filter((r) => r.ok && r.result?.ok).length;
         const sections = results.map((r, i) => {
                 const title = `### [${i + 1}] role=${r.role} ${r.ok ? (r.result?.ok ? "done" : "FAILED") : `unknown role: ${r.error}`}`;
                 if (!r.ok) return `${title}\n${r.error}`;
-                return `${title}\n${formatSingleResult(r.result!)}`;
+                const note = r.note ? `${r.note}\n` : "";
+                return `${title}\n${note}${formatSingleResult(r.result!)}`;
         });
         return `Parallel: ${done}/${results.length} succeeded\n\n${sections.join("\n\n")}`;
 }

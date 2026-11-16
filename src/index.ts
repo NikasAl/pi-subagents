@@ -66,6 +66,7 @@ function formatRolesReport(runtime: Runtime): string {
 	for (const role of roles) {
 		lines.push(
 			`\nrole ${role.name} [${role.source}]${role.filePath ? ` ${role.filePath}` : ""}`,
+			`  ${role.description}`,
 			`  fallback: ${role.models.map((ref, i) => `${i + 1}. ${ref}`).join("  ")}`,
 			`  tools: ${role.tools?.join(", ") ?? "(pi defaults)"} · sticky: ${role.sticky} · spawn attempts: ${role.maxAttempts}`,
 		);

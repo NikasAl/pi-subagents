@@ -87,7 +87,7 @@ One file: `~/.pi/agent/pi-subagents.json` (override the location with the `PI_SU
 
 ### Roles
 
-- **Agent files** (recommended): `~/.pi/agent/agents/<role>.md` with frontmatter `name`, `description`, optional `tools` (comma-separated whitelist passed as `--tools` to the child), optional `model` (default single model). The file body is the role's **entire system prompt** (it replaces pi's default in the child — see [Transparency](#transparency)). See [`agents/`](agents/) for ready examples (`scout`, `planner`, `worker`, `reviewer`).
+- **Agent files** (recommended): `~/.pi/agent/agents/<role>.md` with frontmatter `name`, `description`, optional `tools` (comma-separated whitelist passed as `--tools` to the child), optional `model` (default single model). The file body is the role's **entire system prompt** (it replaces pi's default in the child — see [Transparency](#transparency)). See [`agents/`](agents/) for ready examples (`scout`, `planner`, `worker`, `reviewer`, `writer`).
 - **Fallback lists**: `roles.<name>.models` in the config — priority-ordered `provider/id` refs. Index 0 is primary. Model ids may themselves contain slashes (gateway-style ids, split on the first slash only, e.g. `xkiro/qwen/qwen3.7-max:free`). If a role has a config list, it overrides the agent file's single `model`. A role exists when it has an agent file **and/or** a config entry with models.
 - **Knobs**: `sticky` (`"turn"` — return to the primary model on each new user turn; `"session"` — stay on the model that answered last), `maxAttempts` (level-1 respawns, default 2), `timeoutMs` (per spawn, default 600000), `cwd`, `thinking`.
 
@@ -127,7 +127,9 @@ The model calls the `subagent` tool:
 - **single**: `{ "role": "scout", "task": "..." }`
 - **parallel**: `{ "tasks": [{ "role": "worker", "task": "..." }, ...] }` (max 8, concurrency 4)
 
-`/roles` shows every role, its fallback ladder, per-model health (ok / cooldown / no credentials) and the SOCKS5 providers.
+**Model-facing surface** (so the orchestrator never has to guess role names): the tool's `description` carries the full roster — each role's name plus its `description` frontmatter — and the `role` parameter is a closed string enum built from the live role registry. Role requests are also resolved leniently: case-insensitive, and known near-synonyms are mapped to real roles (`recon`/`research` → `scout`, `plan` → `planner`, `coder`/`implement` → `worker`, `review`/`critique` → `reviewer`); a correction lands in the result as `note: role "..." resolved to "..."`. Truly unknown names are rejected with the roster (names **and** purposes), not just bare names.
+
+`/roles` shows every role, its purpose, its fallback ladder, per-model health (ok / cooldown / no credentials) and the SOCKS5 providers.
 
 Result returned to the parent model (example):
 
